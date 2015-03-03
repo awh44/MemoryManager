@@ -4,45 +4,92 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define SUCCESS    0
-#define ARGS_ERROR 1
-#define OPEN_ERROR 2
-#define NUMB_ERROR 3
+/**
+  * After a read of a line, determines whether the line-endings are UNIX or Windows style,
+  * 'returning' the number of extraneous characters
+  */
+#define EXTRA_CHARS(line, chars_read) line[chars_read - 2] == '\r' ? 2 : 1
 
 #define MIN_ARGS 3
 #define ASCII_0 48
 
+/**
+  * Define error constants. Contain a mixture of user (e.g., not enough command line arguments) and
+  * system (e.g., couldn't read from an open file) errors
+  */
+#define SUCCESS    0
+#define ARGS_ERROR 1
+#define OPEN_ERROR 2
+#define NUMB_ERROR 3
+#define SEEK_ERROR 4
+#define READ_ERROR 5
+
+/**
+  * Define the type for the erorrs. Allows for a total of 2^64 - 1 types of error conditiosn (plus a
+  * succcess condition)
+  */
+typedef uint64_t status_t;
+
+
+/**
+  * Define variosu contants for the size of pages, the total number of pages, the size of frames,
+  * the total number of frames, etc. Note that these constants assume that the number of bits in a
+  * page number is the same as the number of bits in the offset.
+  */
 #define BITS_PER_BYTE     8
-#define ADDRESS_BITS      sizeof(address_t) * BITS_PER_BYTE
-#define PAGE_NUMBER_BITS  sizeof(page_address_t) * BITS_PER_BYTE
 #define OFFSET_BITS       sizeof(offset_t) * BITS_PER_BYTE
-#define MAX_PAGE_NUMBER   UINT8_MAX 
-#define NUMBER_PAGES      MAX_PAGE_NUMBER + 1
-#define MAX_OFFSET        UINT8_MAX 
+#define NUMBER_PAGES      256 
+#define MAX_PAGE_NUMBER   NUMBER_PAGES - 1
+#define MAX_OFFSET        MAX_PAGE_NUMBER
 #define PAGE_BYTES        256
 #define NUMBER_FRAMES     256
 #define FRAME_BYTES       PAGE_BYTES
 
-#define EXTRA_CHARS(line, chars_read) line[chars_read - 2] == '\r' ? 2 : 1
-
-typedef uint16_t address_t;
+typedef uint16_t virtual_address_t;
 typedef uint8_t page_number_t;
+
 typedef uint8_t offset_t;
+
+/**
+  * Used to hold a physical address value, in the range 0 to 65535
+  */
+typedef uint16_t physical_address_t;
+
+/**
+  * Used to hold a frame number, from 0 to NUMBER_FRAMES - 1
+  */
 typedef uint8_t frame_number_t;
+
+/**
+  * A single, individual value in a frame.
+  */
 typedef int8_t frameval_t;
-typedef frameval_t frame_t[FRAME_BYTES];
+
+typedef struct
+{
+	size_t next_frame;
+	frameval_t table[NUMBER_FRAMES][FRAME_BYTES];
+} frame_table_t;
+
 typedef struct
 {
 	frame_number_t frame;
 	uint8_t valid;
 } page_entry_t;
 
-typedef uint64_t status_t;
+typedef struct
+{
+	page_entry_t table[NUMBER_PAGES];
+} page_table_t;
 
-status_t convert(char *line, size_t length, address_t *value);
-void get_page_and_offset(address_t address, page_number_t *page, offset_t *offset);
-page_number_t get_page(address_t address);
-offset_t get_offset(address_t address);
+
+status_t convert(char *line, size_t length, virtual_address_t *value);
+void get_page_and_offset(virtual_address_t address, page_number_t *page, offset_t *offset);
+page_number_t get_page(virtual_address_t address);
+offset_t get_offset(virtual_address_t address);
+status_t load_if_necessary(page_table_t *ptable, page_number_t page, frame_table_t *ftable, FILE *backing);
+physical_address_t get_physical_address(page_table_t *ptable, page_number_t page, offset_t offset);
+frameval_t get_value_at_address(frame_table_t *frames, physical_address_t phys_addr);
 status_t error_message(status_t error);
 
 int main(int argc, char *argv[])
@@ -61,22 +108,26 @@ int main(int argc, char *argv[])
 	FILE *backing;
 	if ((backing = fopen(argv[2], "r")) == NULL)
 	{
+		fclose(fin);
 		return error_message(OPEN_ERROR);
 	}
 
-	frame_t frames[NUMBER_FRAMES] = {0};
-	page_entry_t page_table[NUMBER_PAGES] = {0};
+	size_t translated = 0;
+	frame_table_t frames = {0};
+	page_table_t page_table = {0};
+	
 	char *line = NULL;
 	size_t size = 0;
 	ssize_t chars_read;
-	while ((chars_read = getline(&line, &size, fin)) > 0)
+	uint8_t fatal_error = 0;
+	while ((chars_read = getline(&line, &size, fin)) > 0 && !fatal_error)
 	{
 		//eliminate the newline and (potentially) the carriage return
 		chars_read -= EXTRA_CHARS(line, chars_read);
 		line[chars_read] = '\0';
 		
 		//convert the string to the address
-		address_t address;
+		virtual_address_t address;
 		status_t error;
 		if ((error = convert(line, chars_read, &address)) != SUCCESS)
 		{
@@ -89,23 +140,30 @@ int main(int argc, char *argv[])
 			offset_t offset;
 			get_page_and_offset(address, &page, &offset);
 	
-			int8_t memval;
-			fseek(backing, page * PAGE_BYTES + offset, SEEK_SET);
-			fread(&memval, sizeof(memval), 1, backing);
-
-			//print everything out
-			fprintf(stdout, "%s, %u, %u, %u, %d\n", line, address, page, offset, memval);
+			if ((error = load_if_necessary(&page_table, page, &frames, backing)) != SUCCESS)
+			{
+				fatal_error = 1;
+				error_message(error);
+			}
+			else
+			{
+				translated++;
+				physical_address_t phys_addr = get_physical_address(&page_table, page, offset);
+				frameval_t memval = get_value_at_address(&frames, phys_addr);
+				fprintf(stdout, "Virtual address: %u Physical address: %u Value: %d\r\n", address, phys_addr, memval);
+			}
 		}
 	}
+
+	fprintf(stdout, "Number of Translated Addresses = %zu", translated);
 
 	free(line);
 	fclose(backing);
 	fclose(fin);
-
-	return 0;
+	return SUCCESS;
 }
 
-status_t convert(char *s, size_t length, address_t *value)
+status_t convert(char *s, size_t length, virtual_address_t *value)
 {
     *value = 0;
     size_t power10;
@@ -122,22 +180,58 @@ status_t convert(char *s, size_t length, address_t *value)
     return SUCCESS;
 }
 
-void get_page_and_offset(address_t address, page_number_t *page, offset_t *offset)
+void get_page_and_offset(virtual_address_t address, page_number_t *page, offset_t *offset)
 {
 	*page = get_page(address);
 	*offset = get_offset(address);
 }
 
-page_number_t get_page(address_t address)
+page_number_t get_page(virtual_address_t address)
 {
 	//shift right by the OFFSET_SIZE (because the offset takes up the lower bits), and than AND by
 	//the max value to get the value of the upper bits are
 	return (address >> OFFSET_BITS) & MAX_PAGE_NUMBER;
 }
 
-offset_t get_offset(address_t address)
+offset_t get_offset(virtual_address_t address)
 {
 	return address & MAX_OFFSET;
+}
+
+status_t load_if_necessary(page_table_t *ptable, page_number_t page, frame_table_t *frames, FILE *backing)
+{
+	if (!ptable->table[page].valid)
+	{		
+		//adjust the backing store file to the correct position
+		if (fseek(backing, page * FRAME_BYTES, SEEK_SET) < 0)
+		{
+			return SEEK_ERROR;
+		}
+
+		//read the file into the frames table at the next available frame
+		if (fread(frames->table + frames->next_frame, FRAME_BYTES, 1, backing) < 1) 
+		{
+			return READ_ERROR;
+		}
+
+		//then indicate the frame associated with the page and mark the table entry valid
+		ptable->table[page].frame = frames->next_frame;
+		ptable->table[page].valid = 1;
+		//then update what the next frame will be
+		frames->next_frame++;
+	}
+
+	return SUCCESS;
+}
+
+physical_address_t get_physical_address(page_table_t *ptable, page_number_t page, offset_t offset)
+{
+	return ptable->table[page].frame * FRAME_BYTES + offset;
+}
+
+frameval_t get_value_at_address(frame_table_t *frames, physical_address_t phys_addr)
+{
+	return *((frameval_t *) frames->table + phys_addr); 
 }
 
 status_t error_message(status_t error)
@@ -152,6 +246,12 @@ status_t error_message(status_t error)
 			break;
 		case NUMB_ERROR:
 			fprintf(stderr, "Error: could not convert string to integer.\n");
+			break;
+		case SEEK_ERROR:
+			fprintf(stderr, "Error: could not seek in file.\n");
+			break;
+		case READ_ERROR:
+			fprintf(stderr, "Error: could not read from file.\n");
 			break;
 		default:
 			fprintf(stderr, "Error: unknown error.\n");
