@@ -25,7 +25,7 @@
 #define READ_ERROR 5
 
 /**
-  * Define the type for the erorrs. Allows for a total of 2^64 - 1 types of error conditiosn (plus a
+  * Define the type for the erorrs. Allows for a total of 2^64 - 1 types of error conditions (plus a
   * succcess condition)
   */
 typedef uint64_t status_t;
@@ -46,9 +46,23 @@ typedef uint64_t status_t;
 #define FRAME_BYTES       PAGE_BYTES
 
 typedef uint16_t virtual_address_t;
+
+/**
+  * Used to hold the number of a page, in the range 0 to 255
+  */
 typedef uint8_t page_number_t;
 
+/**
+  * Used to hold the offset from the beginning of a page/frame that a data value begins at, in the
+  * rane 0 to 255
+  */
 typedef uint8_t offset_t;
+
+typedef struct
+{
+	page_number_t page;
+	offset_t offset;
+} virtual_components_t;
 
 /**
   * Used to hold a physical address value, in the range 0 to 65535
@@ -64,6 +78,7 @@ typedef uint8_t frame_number_t;
   * A single, individual value in a frame.
   */
 typedef int8_t frameval_t;
+
 
 typedef struct
 {
@@ -82,13 +97,13 @@ typedef struct
 	page_entry_t table[NUMBER_PAGES];
 } page_table_t;
 
-
+status_t perform_management(FILE *fin, FILE *backing);
 status_t convert(char *line, size_t length, virtual_address_t *value);
-void get_page_and_offset(virtual_address_t address, page_number_t *page, offset_t *offset);
+virtual_components_t get_components(virtual_address_t address);
 page_number_t get_page(virtual_address_t address);
 offset_t get_offset(virtual_address_t address);
 status_t load_if_necessary(page_table_t *ptable, page_number_t page, frame_table_t *ftable, FILE *backing);
-physical_address_t get_physical_address(page_table_t *ptable, page_number_t page, offset_t offset);
+physical_address_t get_physical_address(page_table_t *ptable, virtual_components_t *components);
 frameval_t get_value_at_address(frame_table_t *frames, physical_address_t phys_addr);
 status_t error_message(status_t error);
 
@@ -112,6 +127,15 @@ int main(int argc, char *argv[])
 		return error_message(OPEN_ERROR);
 	}
 
+	status_t error = perform_management(fin, backing);
+
+	fclose(backing);
+	fclose(fin);
+	return error_message(error);
+}
+
+status_t perform_management(FILE *fin, FILE *backing)
+{
 	size_t translated = 0;
 	frame_table_t frames = {0};
 	page_table_t page_table = {0};
@@ -119,8 +143,7 @@ int main(int argc, char *argv[])
 	char *line = NULL;
 	size_t size = 0;
 	ssize_t chars_read;
-	uint8_t fatal_error = 0;
-	while ((chars_read = getline(&line, &size, fin)) > 0 && !fatal_error)
+	while ((chars_read = getline(&line, &size, fin)) > 0)
 	{
 		//eliminate the newline and (potentially) the carriage return
 		chars_read -= EXTRA_CHARS(line, chars_read);
@@ -136,19 +159,17 @@ int main(int argc, char *argv[])
 		else
 		{
 			//get the page and offset from the address
-			page_number_t page;
-			offset_t offset;
-			get_page_and_offset(address, &page, &offset);
-	
-			if ((error = load_if_necessary(&page_table, page, &frames, backing)) != SUCCESS)
+			virtual_components_t components = get_components(address);
+
+			if ((error = load_if_necessary(&page_table, components.page, &frames, backing)) != SUCCESS)
 			{
-				fatal_error = 1;
-				error_message(error);
+				free(line);
+				return error_message(error);
 			}
 			else
 			{
 				translated++;
-				physical_address_t phys_addr = get_physical_address(&page_table, page, offset);
+				physical_address_t phys_addr = get_physical_address(&page_table, &components);
 				frameval_t memval = get_value_at_address(&frames, phys_addr);
 				fprintf(stdout, "Virtual address: %u Physical address: %u Value: %d\r\n", address, phys_addr, memval);
 			}
@@ -158,8 +179,6 @@ int main(int argc, char *argv[])
 	fprintf(stdout, "Number of Translated Addresses = %zu", translated);
 
 	free(line);
-	fclose(backing);
-	fclose(fin);
 	return SUCCESS;
 }
 
@@ -180,10 +199,10 @@ status_t convert(char *s, size_t length, virtual_address_t *value)
     return SUCCESS;
 }
 
-void get_page_and_offset(virtual_address_t address, page_number_t *page, offset_t *offset)
+virtual_components_t get_components(virtual_address_t address)
 {
-	*page = get_page(address);
-	*offset = get_offset(address);
+	virtual_components_t components = { get_page(address), get_offset(address) };
+	return components;
 }
 
 page_number_t get_page(virtual_address_t address)
@@ -224,9 +243,9 @@ status_t load_if_necessary(page_table_t *ptable, page_number_t page, frame_table
 	return SUCCESS;
 }
 
-physical_address_t get_physical_address(page_table_t *ptable, page_number_t page, offset_t offset)
+physical_address_t get_physical_address(page_table_t *ptable, virtual_components_t *components)
 {
-	return ptable->table[page].frame * FRAME_BYTES + offset;
+	return ptable->table[components->page].frame * FRAME_BYTES + components->offset;
 }
 
 frameval_t get_value_at_address(frame_table_t *frames, physical_address_t phys_addr)
