@@ -2,6 +2,8 @@ PAGER=less
 CC=gcc
 OPTS=-o
 
+.PHONY: view-results run
+
 view-results: output/myresults.txt
 	$(PAGER) output/myresults.txt
 
@@ -13,3 +15,7 @@ run: manager
 
 manager: src/main.c
 	$(CC) $(OPTS)manager src/main.c
+
+clean:
+	rm -f manager
+	rm -f output/myresults.txt

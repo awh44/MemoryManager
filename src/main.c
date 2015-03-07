@@ -44,6 +44,7 @@ typedef uint64_t status_t;
 #define PAGE_BYTES        256
 #define NUMBER_FRAMES     256
 #define FRAME_BYTES       PAGE_BYTES
+#define TLB_ENTRIES       16
 
 typedef uint16_t virtual_address_t;
 
@@ -58,6 +59,9 @@ typedef uint8_t page_number_t;
   */
 typedef uint8_t offset_t;
 
+/**
+  * Holds the two components of a virtual address, the page number and the offset within the page
+  */
 typedef struct
 {
 	page_number_t page;
@@ -79,32 +83,50 @@ typedef uint8_t frame_number_t;
   */
 typedef int8_t frameval_t;
 
-
+/**
+  * The frame table data structure. Holds the actual physical memory and information on which frame
+  * is to be used next upon a page fault
+  */
 typedef struct
 {
 	size_t next_frame;
 	frameval_t table[NUMBER_FRAMES][FRAME_BYTES];
 } frame_table_t;
 
+/**
+  * Used to represent a single entry in a page table, including which frame is being referenced and
+  * whether the reference is currently valid
+  */
 typedef struct
 {
 	frame_number_t frame;
 	uint8_t valid;
 } page_entry_t;
 
+/**
+  * The data structure for the page table, made up of an array of page entries
+  */
 typedef struct
 {
 	page_entry_t table[NUMBER_PAGES];
 } page_table_t;
 
+typedef struct
+{
+	page_number_t pages[TLB_ENTRIES];
+	frame_number_t frames[TLB_ENTRIES];
+} tlb_t;
+
 status_t perform_management(FILE *fin, FILE *backing);
 status_t convert(char *line, size_t length, virtual_address_t *value);
+status_t print_for_address(FILE *fin, FILE *backing, virtual_address_t address, frame_table_t *frames, page_table_t *page_table, size_t *translated);
 virtual_components_t get_components(virtual_address_t address);
 page_number_t get_page(virtual_address_t address);
 offset_t get_offset(virtual_address_t address);
 status_t load_if_necessary(page_table_t *ptable, page_number_t page, frame_table_t *ftable, FILE *backing);
 physical_address_t get_physical_address(page_table_t *ptable, virtual_components_t *components);
 frameval_t get_value_at_address(frame_table_t *frames, physical_address_t phys_addr);
+
 status_t error_message(status_t error);
 
 int main(int argc, char *argv[])
@@ -156,23 +178,10 @@ status_t perform_management(FILE *fin, FILE *backing)
 		{
 			error_message(error);
 		}
-		else
+		else if ((error = print_for_address(fin, backing, address, &frames, &page_table, &translated)) != SUCCESS)
 		{
-			//get the page and offset from the address
-			virtual_components_t components = get_components(address);
-
-			if ((error = load_if_necessary(&page_table, components.page, &frames, backing)) != SUCCESS)
-			{
-				free(line);
-				return error_message(error);
-			}
-			else
-			{
-				translated++;
-				physical_address_t phys_addr = get_physical_address(&page_table, &components);
-				frameval_t memval = get_value_at_address(&frames, phys_addr);
-				fprintf(stdout, "Virtual address: %u Physical address: %u Value: %d\r\n", address, phys_addr, memval);
-			}
+			free(line);
+			return error;
 		}
 	}
 
@@ -197,6 +206,23 @@ status_t convert(char *s, size_t length, virtual_address_t *value)
     }
 
     return SUCCESS;
+}
+
+status_t print_for_address(FILE *fin, FILE *backing, virtual_address_t address, frame_table_t *frames, page_table_t *page_table, size_t *translated)
+{
+	//get the page and offset from the address
+	virtual_components_t components = get_components(address);
+
+	status_t error;
+	if ((error = load_if_necessary(page_table, components.page, frames, backing)) == SUCCESS)
+	{
+		(*translated)++;
+		physical_address_t phys_addr = get_physical_address(page_table, &components);
+		frameval_t memval = get_value_at_address(frames, phys_addr);
+		fprintf(stdout, "Virtual address: %u Physical address: %u Value: %d\r\n", address, phys_addr, memval);
+	}
+
+	return error;
 }
 
 virtual_components_t get_components(virtual_address_t address)
@@ -257,6 +283,8 @@ status_t error_message(status_t error)
 {
 	switch (error)
 	{
+		case SUCCESS:
+			break;
 		case ARGS_ERROR:
 			fprintf(stderr, "Error: please include input files as command line arguments.\n");
 			break;
