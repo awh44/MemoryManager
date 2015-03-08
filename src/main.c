@@ -116,7 +116,7 @@ typedef struct
 
 typedef struct
 {
-	lru_queue_t next_in_line;
+	lru_queue_t queue;
 	uint16_t pages[TLB_ENTRIES];
 	frame_number_t frames[TLB_ENTRIES];
 } tlb_t;
@@ -202,13 +202,13 @@ status_t perform_management(FILE *fin, FILE *backing)
 
 void tlb_initialize(tlb_t *tlb)
 {
-	lru_queue_initialize(&tlb->next_in_line);
+	lru_queue_initialize(&tlb->queue);
 	
 	size_t i;
 	for (i = 0; i < TLB_ENTRIES; i++)
 	{
 		tlb->pages[i] = INVALID_PAGE;
-		lru_queue_insert_new(&tlb->next_in_line, TLB_ENTRIES - i);
+		lru_queue_insert_new(&tlb->queue, TLB_ENTRIES - i);
 	}
 }
 
@@ -252,13 +252,13 @@ status_t print_for_address(FILE *fin, FILE *backing, virtual_address_t address, 
 		phys_addr = get_physical_address_from_page_table(page_table, &components);
 
 		//update the tlb
-		tlb_entry = lru_queue_get(&tlb->next_in_line);
+		tlb_entry = lru_queue_get(&tlb->queue);
 		tlb->pages[tlb_entry] = components.page;
 		tlb->frames[tlb_entry] = page_table->table[components.page].frame;
 	}
 
 
-	lru_queue_update_existing(&tlb->next_in_line, tlb_entry);
+	lru_queue_update_existing(&tlb->queue, tlb_entry);
 	(*translated)++;
 	frameval_t memval = get_value_at_address(frames, phys_addr);
 	fprintf(stdout, "Virtual address: %u Physical address: %u Value: %d\r\n", address, phys_addr, memval);
