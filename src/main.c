@@ -4,6 +4,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "../include/lru_queue.h"
+
 /**
   * After a read of a line, determines whether the line-endings are UNIX or Windows style,
   * 'returning' the number of extraneous characters
@@ -40,22 +42,23 @@ typedef uint64_t status_t;
 #define OFFSET_BITS       sizeof(offset_t) * BITS_PER_BYTE
 #define NUMBER_PAGES      256 
 #define MAX_PAGE_NUMBER   NUMBER_PAGES - 1
-#define MAX_OFFSET        MAX_PAGE_NUMBER
+#define MAX_OFFSET        255 
 #define PAGE_BYTES        256
 #define NUMBER_FRAMES     256
 #define FRAME_BYTES       PAGE_BYTES
 #define TLB_ENTRIES       16
+#define INVALID_PAGE      NUMBER_PAGES
 
 typedef uint16_t virtual_address_t;
 
 /**
-  * Used to hold the number of a page, in the range 0 to 255
+  * Used to hold the number of a page, in the range 0 to MAX_PAGe_NUMBER (currently 255)
   */
 typedef uint8_t page_number_t;
 
 /**
   * Used to hold the offset from the beginning of a page/frame that a data value begins at, in the
-  * rane 0 to 255
+  * range 0 to MAX_OFFSET (currently 255)
   */
 typedef uint8_t offset_t;
 
@@ -113,18 +116,22 @@ typedef struct
 
 typedef struct
 {
-	page_number_t pages[TLB_ENTRIES];
+	lru_queue_t next_in_line;
+	uint16_t pages[TLB_ENTRIES];
 	frame_number_t frames[TLB_ENTRIES];
 } tlb_t;
 
 status_t perform_management(FILE *fin, FILE *backing);
+void tlb_initialize(tlb_t *tlb);
 status_t convert(char *line, size_t length, virtual_address_t *value);
-status_t print_for_address(FILE *fin, FILE *backing, virtual_address_t address, frame_table_t *frames, page_table_t *page_table, size_t *translated);
+status_t print_for_address(FILE *fin, FILE *backing, virtual_address_t address, frame_table_t *frames, page_table_t *page_table, tlb_t *tlb, size_t *translated);
 virtual_components_t get_components(virtual_address_t address);
 page_number_t get_page(virtual_address_t address);
 offset_t get_offset(virtual_address_t address);
+int get_frame_from_tlb(tlb_t *tlb, page_number_t page, frame_number_t *frame); 
 status_t load_if_necessary(page_table_t *ptable, page_number_t page, frame_table_t *ftable, FILE *backing);
-physical_address_t get_physical_address(page_table_t *ptable, virtual_components_t *components);
+physical_address_t get_physical_address_from_page_table(page_table_t *ptable, virtual_components_t *components);
+physical_address_t get_physical_address(frame_number_t frame, offset_t offset);
 frameval_t get_value_at_address(frame_table_t *frames, physical_address_t phys_addr);
 
 status_t error_message(status_t error);
@@ -161,6 +168,8 @@ status_t perform_management(FILE *fin, FILE *backing)
 	size_t translated = 0;
 	frame_table_t frames = {0};
 	page_table_t page_table = {0};
+	tlb_t tlb;
+	tlb_initialize(&tlb);
 	
 	char *line = NULL;
 	size_t size = 0;
@@ -178,7 +187,7 @@ status_t perform_management(FILE *fin, FILE *backing)
 		{
 			error_message(error);
 		}
-		else if ((error = print_for_address(fin, backing, address, &frames, &page_table, &translated)) != SUCCESS)
+		else if ((error = print_for_address(fin, backing, address, &frames, &page_table, &tlb, &translated)) != SUCCESS)
 		{
 			free(line);
 			return error;
@@ -189,6 +198,18 @@ status_t perform_management(FILE *fin, FILE *backing)
 
 	free(line);
 	return SUCCESS;
+}
+
+void tlb_initialize(tlb_t *tlb)
+{
+	lru_queue_initialize(&tlb->next_in_line);
+	
+	size_t i;
+	for (i = 0; i < TLB_ENTRIES; i++)
+	{
+		tlb->pages[i] = INVALID_PAGE;
+		lru_queue_insert_new(&tlb->next_in_line, TLB_ENTRIES - i);
+	}
 }
 
 status_t convert(char *s, size_t length, virtual_address_t *value)
@@ -208,21 +229,40 @@ status_t convert(char *s, size_t length, virtual_address_t *value)
     return SUCCESS;
 }
 
-status_t print_for_address(FILE *fin, FILE *backing, virtual_address_t address, frame_table_t *frames, page_table_t *page_table, size_t *translated)
+status_t print_for_address(FILE *fin, FILE *backing, virtual_address_t address, frame_table_t *frames, page_table_t *page_table, tlb_t *tlb, size_t *translated)
 {
 	//get the page and offset from the address
 	virtual_components_t components = get_components(address);
 
-	status_t error;
-	if ((error = load_if_necessary(page_table, components.page, frames, backing)) == SUCCESS)
+	frame_number_t frame;
+	physical_address_t phys_addr;
+	int tlb_entry;
+	if ((tlb_entry = get_frame_from_tlb(tlb, components.page, &frame)) != TLB_ENTRIES)
 	{
-		(*translated)++;
-		physical_address_t phys_addr = get_physical_address(page_table, &components);
-		frameval_t memval = get_value_at_address(frames, phys_addr);
-		fprintf(stdout, "Virtual address: %u Physical address: %u Value: %d\r\n", address, phys_addr, memval);
+		phys_addr = get_physical_address(frame, components.offset);
+	}
+	else 
+	{
+		status_t error;
+		if ((error = load_if_necessary(page_table, components.page, frames, backing)) != SUCCESS)
+		{
+			return error;
+		}
+
+		phys_addr = get_physical_address_from_page_table(page_table, &components);
+
+		//update the tlb
+		tlb_entry = lru_queue_get(&tlb->next_in_line);
+		tlb->pages[tlb_entry] = components.page;
+		tlb->frames[tlb_entry] = page_table->table[components.page].frame;
 	}
 
-	return error;
+
+	lru_queue_update_existing(&tlb->next_in_line, tlb_entry);
+	(*translated)++;
+	frameval_t memval = get_value_at_address(frames, phys_addr);
+	fprintf(stdout, "Virtual address: %u Physical address: %u Value: %d\r\n", address, phys_addr, memval);
+	return SUCCESS;
 }
 
 virtual_components_t get_components(virtual_address_t address)
@@ -241,6 +281,21 @@ page_number_t get_page(virtual_address_t address)
 offset_t get_offset(virtual_address_t address)
 {
 	return address & MAX_OFFSET;
+}
+
+int get_frame_from_tlb(tlb_t *tlb, page_number_t page, frame_number_t *frame)
+{
+	size_t i;
+	for (i = 0; i < TLB_ENTRIES; i++)
+	{
+		if (tlb->pages[i] == page)
+		{
+			*frame = tlb->frames[i];
+			return TLB_ENTRIES;
+		}
+	}
+
+	return TLB_ENTRIES;
 }
 
 status_t load_if_necessary(page_table_t *ptable, page_number_t page, frame_table_t *frames, FILE *backing)
@@ -269,9 +324,14 @@ status_t load_if_necessary(page_table_t *ptable, page_number_t page, frame_table
 	return SUCCESS;
 }
 
-physical_address_t get_physical_address(page_table_t *ptable, virtual_components_t *components)
+physical_address_t get_physical_address_from_page_table(page_table_t *ptable, virtual_components_t *components)
 {
-	return ptable->table[components->page].frame * FRAME_BYTES + components->offset;
+	return get_physical_address(ptable->table[components->page].frame, components->offset);
+}
+
+physical_address_t get_physical_address(frame_number_t frame, offset_t offset)
+{
+	return frame * FRAME_BYTES + offset;
 }
 
 frameval_t get_value_at_address(frame_table_t *frames, physical_address_t phys_addr)
