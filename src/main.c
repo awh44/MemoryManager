@@ -316,18 +316,22 @@ status_t print_for_address(FILE *fin, FILE *backing, virtual_address_t address, 
 		tlb->frames[tlb_entry] = page_table->table[components.page].frame;
 	}
 
+	//actually retrieve the memory value at the given physical address
+	frameval_t memval = get_value_at_address(frames, phys_addr);
+	fprintf(stdout, "Virtual address: %u Physical address: %u Value: %d\r\n", address, phys_addr, memval);
+
 	//if it's a write, set the dirty bit after the memory access
 	if (is_write)
 	{
 		page_table->table[components.page].dirty = 1;
 	}
 
-	//update the lru information for the tlb
+	//update the LRU information for the tlb
 	lru_queue_update_existing(&tlb->queue, tlb_entry);
 
-	//actually retrieve the memory value at the given physical address
-	frameval_t memval = get_value_at_address(frames, phys_addr);
-	fprintf(stdout, "Virtual address: %u Physical address: %u Value: %d\r\n", address, phys_addr, memval);
+	
+	//indicate that the frame has just been referenced to bring it to the front of the LRU queue
+	lru_queue_update_existing(&frames->queue, page_table->table[components.page].frame);
 
 	//update the statistics
 	statistics.translated++;
@@ -413,9 +417,6 @@ status_t load_if_necessary(page_table_t *ptable, page_number_t page, frame_table
 		frames->page_for_frame[next_frame] = page;
 
 	}
-
-	//indicate that the frame has just been referenced to bring it to the front of the LRU queue
-	lru_queue_update_existing(&frames->queue, ptable->table[page].frame);
 
 	return SUCCESS;
 }
