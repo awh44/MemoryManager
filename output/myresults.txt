@@ -999,5 +999,6 @@ Virtual address: 9929 Physical address: 6857 Value: 0
 Virtual address: 45563 Physical address: 251 Value: 126
 Virtual address: 12107 Physical address: 24395 Value: -46
 Number of Translated Addresses = 1000
-Percentage of Page Faults = 0.537000
-TLB hit ratio = 0.055000
+Percentage of Page Faults = 0.537000 (absolute = 537)
+TLB Hit Ratio = 0.055000 (absolute = 55)
+Write-Backs = 409

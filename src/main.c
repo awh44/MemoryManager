@@ -73,7 +73,7 @@ typedef struct
 } virtual_components_t;
 
 /**
-  * Used to hold a physical address value, in the range 0 to 65535
+  * Used to hold a physical address value, in the range 0 to 32768 (NUMBER_FRAMES * FRAME_BYTES)
   */
 typedef uint16_t physical_address_t;
 
@@ -107,6 +107,7 @@ typedef struct
 {
 	frame_number_t frame;
 	uint8_t valid;
+	uint8_t dirty;
 } page_entry_t;
 
 /**
@@ -118,7 +119,8 @@ typedef struct
 } page_table_t;
 
 /**
-  * Holds the information on the TLB
+  * Holds the information on the TLB, including which page numbers are in it and which entry is to
+  * be replaced next
   */
 typedef struct
 {
@@ -127,18 +129,22 @@ typedef struct
 	lru_queue_t queue;
 } tlb_t;
 
+/**
+  * Holds a variety of statistical information, including total number of addresses translated,
+  * number of page faults, number of tlb hits, and number of write-backs occuring
+  */
 typedef struct
 {
 	size_t translated;
 	size_t page_faults;
 	size_t tlb_hits;
+	size_t write_backs;
 } statistics_t;
-
 
 static statistics_t statistics;
 
 status_t perform_management(FILE *fin, FILE *backing);
-status_t print_for_address(FILE *fin, FILE *backing, virtual_address_t address, frame_table_t *frames, page_table_t *page_table, tlb_t *tlb);
+status_t print_for_address(FILE *fin, FILE *backing, virtual_address_t address, frame_table_t *frames, page_table_t *page_table, tlb_t *tlb, uint8_t is_write);
 
 status_t convert(char *line, size_t length, virtual_address_t *value);
 virtual_components_t get_components(virtual_address_t address);
@@ -201,9 +207,11 @@ status_t perform_management(FILE *fin, FILE *backing)
 	ssize_t chars_read;
 	while ((chars_read = getline(&line, &size, fin)) > 0)
 	{
-		//eliminate the newline and (potentially) the carriage return
-		chars_read -= EXTRA_CHARS(line, chars_read);
+		//eliminate the newline and (potentially) the carriage return as well as one for the space
+		//and the Read/Write indicator
+		chars_read -= EXTRA_CHARS(line, chars_read) + 2;
 		line[chars_read] = '\0';
+		uint8_t is_write = line[chars_read + 1];
 		
 		//convert the string to the address
 		virtual_address_t address;
@@ -212,7 +220,7 @@ status_t perform_management(FILE *fin, FILE *backing)
 		{
 			error_message(error);
 		}
-		else if ((error = print_for_address(fin, backing, address, &frames, &page_table, &tlb)) != SUCCESS)
+		else if ((error = print_for_address(fin, backing, address, &frames, &page_table, &tlb, is_write)) != SUCCESS)
 		{
 			free(line);
 			return error;
@@ -220,8 +228,9 @@ status_t perform_management(FILE *fin, FILE *backing)
 	}
 
 	fprintf(stdout, "Number of Translated Addresses = %zu\n", statistics.translated);
-	fprintf(stdout, "Percentage of Page Faults = %lf\n", (double) statistics.page_faults / statistics.translated);
-	fprintf(stdout, "TLB hit ratio = %lf\n", (double) statistics.tlb_hits / statistics.translated);
+	fprintf(stdout, "Percentage of Page Faults = %lf (absolute = %zu)\n", (double) statistics.page_faults / statistics.translated, statistics.page_faults);
+	fprintf(stdout, "TLB Hit Ratio = %lf (absolute = %zu)\n", (double) statistics.tlb_hits / statistics.translated, statistics.tlb_hits);
+	fprintf(stdout, "Write-Backs = %zu\n", statistics.write_backs);
 
 	free(line);
 	tlb_uninitialize(&tlb);
@@ -279,11 +288,11 @@ status_t convert(char *s, size_t length, virtual_address_t *value)
     return SUCCESS;
 }
 
-status_t print_for_address(FILE *fin, FILE *backing, virtual_address_t address, frame_table_t *frames, page_table_t *page_table, tlb_t *tlb)
+status_t print_for_address(FILE *fin, FILE *backing, virtual_address_t address, frame_table_t *frames, page_table_t *page_table, tlb_t *tlb, uint8_t is_write)
 {
 	//get the page and offset from the address
 	virtual_components_t components = get_components(address);
-
+	
 	frame_number_t frame;
 	physical_address_t phys_addr;
 	int tlb_entry;
@@ -307,12 +316,22 @@ status_t print_for_address(FILE *fin, FILE *backing, virtual_address_t address, 
 		tlb->frames[tlb_entry] = page_table->table[components.page].frame;
 	}
 
+	//if it's a write, set the dirty bit after the memory access
+	if (is_write)
+	{
+		page_table->table[components.page].dirty = 1;
+	}
 
 	//update the lru information for the tlb
 	lru_queue_update_existing(&tlb->queue, tlb_entry);
-	statistics.translated++;
+
+	//actually retrieve the memory value at the given physical address
 	frameval_t memval = get_value_at_address(frames, phys_addr);
 	fprintf(stdout, "Virtual address: %u Physical address: %u Value: %d\r\n", address, phys_addr, memval);
+
+	//update the statistics
+	statistics.translated++;
+
 	return SUCCESS;
 }
 
@@ -355,6 +374,7 @@ status_t load_if_necessary(page_table_t *ptable, page_number_t page, frame_table
 	if (!ptable->table[page].valid)
 	{
 		statistics.page_faults++;
+		
 		//adjust the backing store file to the correct position
 		if (fseek(backing, page * FRAME_BYTES, SEEK_SET) < 0)
 		{
@@ -370,8 +390,13 @@ status_t load_if_necessary(page_table_t *ptable, page_number_t page, frame_table
 		else
 		{
 			next_frame = lru_queue_get(&frames->queue);
-			//invalid the page previously at the frame
-			ptable->table[frames->page_for_frame[next_frame]].valid = 0;
+			//invalidate the page previously at the frame
+			page_number_t prev_page = frames->page_for_frame[next_frame];
+			ptable->table[prev_page].valid = 0;
+			if (ptable->table[prev_page].dirty)
+			{
+				statistics.write_backs++;
+			}
 		}
 		//read the file into the frames table at the next available frame
 		if (fread(frames->table + next_frame, FRAME_BYTES, 1, backing) < 1) 
@@ -379,9 +404,11 @@ status_t load_if_necessary(page_table_t *ptable, page_number_t page, frame_table
 			return READ_ERROR;
 		}
 
-		//then indicate the frame associated with the page and mark the table entry valid
-		ptable->table[page].frame = next_frame;
+		//then indicate the frame associated with the page and mark the table entry valid and
+		//undirty
+		ptable->table[page].frame = next_frame; 
 		ptable->table[page].valid = 1;
+		ptable->table[page].dirty = 0;
 		//and associate the given frame with the new page
 		frames->page_for_frame[next_frame] = page;
 

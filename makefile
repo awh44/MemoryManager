@@ -12,7 +12,7 @@ view-results: output/myresults.txt
 compare: output/myresults.txt
 	#Compare just the values (i.e., the rightmost field). Head removes the statistics from the end
 	#of my results
-	$(AWK) output/myresults.txt | head -n -2 | diff - output/values_correct.txt
+	$(AWK) output/myresults.txt | head -n -3 | diff - output/values_correct.txt
 
 output/myresults.txt: manager
 	./manager input/addresses.txt input/BACKING_STORE.bin > output/myresults.txt
