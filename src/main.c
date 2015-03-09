@@ -394,7 +394,11 @@ status_t load_if_necessary(page_table_t *ptable, page_number_t page, frame_table
 		else
 		{
 			next_frame = lru_queue_get(&frames->queue);
-			//invalidate the page previously at the frame
+			//invalidate the page previously at the frame. Note that the TLB does not have to be
+			//updated because both the TLB and the frame table use LRU behavior to determine the
+			//next thing to remove. Therefore, if something is in the TLB, there is no way it could
+			//be invalidated here, because it would have been used more recently than 128 pages ago
+			//(because the TLB has only 16 entries)
 			page_number_t prev_page = frames->page_for_frame[next_frame];
 			ptable->table[prev_page].valid = 0;
 			if (ptable->table[prev_page].dirty)
