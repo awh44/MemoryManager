@@ -14,13 +14,13 @@ run: manager
 	./manager $(FILE) $(BACKING)
 
 manager: build/main.o build/lru_queue.o
-	$(CC) $(OPTS)manager build/main.o build/lru_queue.o
+	$(CC) $(DEBUG) $(OPTS)manager build/main.o build/lru_queue.o
 
 build/main.o: src/main.c
-	$(CC) -c $(OPTS)build/main.o src/main.c
+	$(CC) -c $(DEBUG) $(OPTS)build/main.o src/main.c
 
 build/lru_queue.o: include/lru_queue.h src/lru_queue.c
-	$(CC) -c $(OPTS)build/lru_queue.o src/lru_queue.c
+	$(CC) -c $(DEBUG) $(OPTS)build/lru_queue.o src/lru_queue.c
 
 clean:
 	rm -f manager

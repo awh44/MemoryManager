@@ -44,7 +44,8 @@ typedef uint64_t status_t;
 #define MAX_PAGE_NUMBER   NUMBER_PAGES - 1
 #define MAX_OFFSET        255 
 #define PAGE_BYTES        256
-#define NUMBER_FRAMES     256
+#define NUMBER_FRAMES     128
+#define MAX_FRAME_NUMBER  NUMBER_FRAMES - 1
 #define FRAME_BYTES       PAGE_BYTES
 #define TLB_ENTRIES       16
 #define INVALID_PAGE      NUMBER_PAGES
@@ -92,8 +93,10 @@ typedef int8_t frameval_t;
   */
 typedef struct
 {
-	size_t next_frame;
+	frame_number_t used_frames;
 	frameval_t table[NUMBER_FRAMES][FRAME_BYTES];
+	page_number_t page_for_frame[NUMBER_FRAMES];
+	lru_queue_t queue;
 } frame_table_t;
 
 /**
@@ -114,25 +117,47 @@ typedef struct
 	page_entry_t table[NUMBER_PAGES];
 } page_table_t;
 
+/**
+  * Holds the information on the TLB
+  */
 typedef struct
 {
-	lru_queue_t queue;
 	uint16_t pages[TLB_ENTRIES];
 	frame_number_t frames[TLB_ENTRIES];
+	lru_queue_t queue;
 } tlb_t;
 
+typedef struct
+{
+	size_t translated;
+	size_t page_faults;
+	size_t tlb_hits;
+} statistics_t;
+
+
+static statistics_t statistics;
+
 status_t perform_management(FILE *fin, FILE *backing);
-void tlb_initialize(tlb_t *tlb);
+status_t print_for_address(FILE *fin, FILE *backing, virtual_address_t address, frame_table_t *frames, page_table_t *page_table, tlb_t *tlb);
+
 status_t convert(char *line, size_t length, virtual_address_t *value);
-status_t print_for_address(FILE *fin, FILE *backing, virtual_address_t address, frame_table_t *frames, page_table_t *page_table, tlb_t *tlb, size_t *translated);
 virtual_components_t get_components(virtual_address_t address);
-page_number_t get_page(virtual_address_t address);
 offset_t get_offset(virtual_address_t address);
-int get_frame_from_tlb(tlb_t *tlb, page_number_t page, frame_number_t *frame); 
+page_number_t get_page(virtual_address_t address);
+
+void frame_table_initialize(frame_table_t *frames);
+void frame_table_uninitialize(frame_table_t *frames);
 status_t load_if_necessary(page_table_t *ptable, page_number_t page, frame_table_t *ftable, FILE *backing);
+frame_number_t get_next_frame(frame_table_t *frames);
+
+void tlb_initialize(tlb_t *tlb);
+void tlb_uninitialize(tlb_t *tlb);
+int get_frame_from_tlb(tlb_t *tlb, page_number_t page, frame_number_t *frame);
+
 physical_address_t get_physical_address_from_page_table(page_table_t *ptable, virtual_components_t *components);
 physical_address_t get_physical_address(frame_number_t frame, offset_t offset);
 frameval_t get_value_at_address(frame_table_t *frames, physical_address_t phys_addr);
+
 
 status_t error_message(status_t error);
 
@@ -165,8 +190,8 @@ int main(int argc, char *argv[])
 
 status_t perform_management(FILE *fin, FILE *backing)
 {
-	size_t translated = 0;
-	frame_table_t frames = {0};
+	frame_table_t frames;
+	frame_table_initialize(&frames);
 	page_table_t page_table = {0};
 	tlb_t tlb;
 	tlb_initialize(&tlb);
@@ -187,17 +212,37 @@ status_t perform_management(FILE *fin, FILE *backing)
 		{
 			error_message(error);
 		}
-		else if ((error = print_for_address(fin, backing, address, &frames, &page_table, &tlb, &translated)) != SUCCESS)
+		else if ((error = print_for_address(fin, backing, address, &frames, &page_table, &tlb)) != SUCCESS)
 		{
 			free(line);
 			return error;
 		}
 	}
 
-	fprintf(stdout, "Number of Translated Addresses = %zu", translated);
+	fprintf(stdout, "Number of Translated Addresses = %zu\n", statistics.translated);
+	fprintf(stdout, "Percentage of Page Faults = %lf\n", (double) statistics.page_faults / statistics.translated);
+	fprintf(stdout, "TLB hit ratio = %lf\n", (double) statistics.tlb_hits / statistics.translated);
 
 	free(line);
+	tlb_uninitialize(&tlb);
+	frame_table_uninitialize(&frames);
 	return SUCCESS;
+}
+
+void frame_table_initialize(frame_table_t *frames)
+{
+	frames->used_frames = 0;
+	lru_queue_initialize(&frames->queue);
+	size_t i;
+	for (i = 0; i < NUMBER_FRAMES; i++)
+	{
+		lru_queue_insert_new(&frames->queue, NUMBER_FRAMES - i - 1);
+	}
+}
+
+void frame_table_uninitialize(frame_table_t *frames)
+{
+	lru_queue_uninitialize(&frames->queue);
 }
 
 void tlb_initialize(tlb_t *tlb)
@@ -208,8 +253,13 @@ void tlb_initialize(tlb_t *tlb)
 	for (i = 0; i < TLB_ENTRIES; i++)
 	{
 		tlb->pages[i] = INVALID_PAGE;
-		lru_queue_insert_new(&tlb->queue, TLB_ENTRIES - i);
+		lru_queue_insert_new(&tlb->queue, TLB_ENTRIES - i - 1);
 	}
+}
+
+void tlb_uninitialize(tlb_t *tlb)
+{
+	lru_queue_uninitialize(&tlb->queue);
 }
 
 status_t convert(char *s, size_t length, virtual_address_t *value)
@@ -229,7 +279,7 @@ status_t convert(char *s, size_t length, virtual_address_t *value)
     return SUCCESS;
 }
 
-status_t print_for_address(FILE *fin, FILE *backing, virtual_address_t address, frame_table_t *frames, page_table_t *page_table, tlb_t *tlb, size_t *translated)
+status_t print_for_address(FILE *fin, FILE *backing, virtual_address_t address, frame_table_t *frames, page_table_t *page_table, tlb_t *tlb)
 {
 	//get the page and offset from the address
 	virtual_components_t components = get_components(address);
@@ -258,8 +308,9 @@ status_t print_for_address(FILE *fin, FILE *backing, virtual_address_t address, 
 	}
 
 
+	//update the lru information for the tlb
 	lru_queue_update_existing(&tlb->queue, tlb_entry);
-	(*translated)++;
+	statistics.translated++;
 	frameval_t memval = get_value_at_address(frames, phys_addr);
 	fprintf(stdout, "Virtual address: %u Physical address: %u Value: %d\r\n", address, phys_addr, memval);
 	return SUCCESS;
@@ -290,8 +341,9 @@ int get_frame_from_tlb(tlb_t *tlb, page_number_t page, frame_number_t *frame)
 	{
 		if (tlb->pages[i] == page)
 		{
+			statistics.tlb_hits++;
 			*frame = tlb->frames[i];
-			return TLB_ENTRIES;
+			return i;
 		}
 	}
 
@@ -301,25 +353,42 @@ int get_frame_from_tlb(tlb_t *tlb, page_number_t page, frame_number_t *frame)
 status_t load_if_necessary(page_table_t *ptable, page_number_t page, frame_table_t *frames, FILE *backing)
 {
 	if (!ptable->table[page].valid)
-	{		
+	{
+		statistics.page_faults++;
 		//adjust the backing store file to the correct position
 		if (fseek(backing, page * FRAME_BYTES, SEEK_SET) < 0)
 		{
 			return SEEK_ERROR;
 		}
 
+		frame_number_t next_frame;
+		if (frames->used_frames < NUMBER_FRAMES)
+		{
+			next_frame = frames->used_frames;
+			frames->used_frames++;
+		}
+		else
+		{
+			next_frame = lru_queue_get(&frames->queue);
+			//invalid the page previously at the frame
+			ptable->table[frames->page_for_frame[next_frame]].valid = 0;
+		}
 		//read the file into the frames table at the next available frame
-		if (fread(frames->table + frames->next_frame, FRAME_BYTES, 1, backing) < 1) 
+		if (fread(frames->table + next_frame, FRAME_BYTES, 1, backing) < 1) 
 		{
 			return READ_ERROR;
 		}
 
 		//then indicate the frame associated with the page and mark the table entry valid
-		ptable->table[page].frame = frames->next_frame;
+		ptable->table[page].frame = next_frame;
 		ptable->table[page].valid = 1;
-		//then update what the next frame will be
-		frames->next_frame++;
+		//and associate the given frame with the new page
+		frames->page_for_frame[next_frame] = page;
+
 	}
+
+	//indicate that the frame has just been referenced to bring it to the front of the LRU queue
+	lru_queue_update_existing(&frames->queue, ptable->table[page].frame);
 
 	return SUCCESS;
 }
