@@ -6,7 +6,7 @@
 
 #include "../include/lru_queue.h"
 
-#define EXTRA_CHARS 2
+#define EXTRA_CHARS 1
 
 #define MIN_ARGS 3
 #define ASCII_0 48
@@ -360,7 +360,7 @@ status_t perform_management(FILE *fin, FILE *backing)
 	fprintf(stdout, "Number of Translated Addresses = %zu\n", statistics.translated);
 	fprintf(stdout, "Percentage of Page Faults = %lf (absolute = %zu)\n", (double) statistics.page_faults / statistics.translated, statistics.page_faults);
 	fprintf(stdout, "TLB Hit Ratio = %lf (absolute = %zu)\n", (double) statistics.tlb_hits / statistics.translated, statistics.tlb_hits);
-	fprintf(stdout, "Write-Backs = %zu\n", statistics.write_backs);
+	fprintf(stdout, "Write-Backs = %lf (absolute = %zu)\n", (double) statistics.write_backs / statistics.translated, statistics.write_backs);
 
 	free(line);
 	tlb_uninitialize(&tlb);

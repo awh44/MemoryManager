@@ -1002,4 +1002,4 @@ Virtual address: 12107 Physical address: 17739 Value: -46
 Number of Translated Addresses = 1001
 Percentage of Page Faults = 0.538462 (absolute = 539)
 TLB Hit Ratio = 0.055944 (absolute = 56)
-Write-Backs = 122
+Write-Backs = 0.121878 (absolute = 122)

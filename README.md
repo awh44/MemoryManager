@@ -43,6 +43,7 @@ Also included are the given input files:
 	input/addresses.txt
 	input/addresses2.txt
 	input/BACKING_STORE.bin
-Note that it is assumed that the two address files have DOS line endings
-("\r\n") and not UNIX ("\n"). If this is not case, then the line
-\#define EXTRA\_CHARS 2 in src/main.c must be changed to #define EXTRA\_CHARS 1
+Note that the addresses have been sanitized to be of UNIX line endings ("\n")
+instead of DOS ("\r\n") ones. If it is not the case that the input files have
+this property, then the line #define EXTRA\_CHARS 1 in src/main.c must be
+changed to #define EXTRA\_CHARS 2
