@@ -274,7 +274,7 @@ static statistics_t statistics;
 	physical_address_t get_physical_address(frame_number_t frame, offset_t offset);
 //PHYSICAL ADDRESS FUNCTIONS-----------------------------------------------------------------------
 
-//ERROR FUNCTIONS
+//ERROR FUNCTIONS----------------------------------------------------------------------------------
 	/**
 	  * Prints an error message for an error of type status_t, returning the passed error upon
 	  * completion
@@ -282,6 +282,7 @@ static statistics_t statistics;
 	  * @return the passed error
 	  */
 	status_t error_message(status_t error);
+//END ERROR FUNCTIONS------------------------------------------------------------------------------
 
 int main(int argc, char *argv[])
 {
