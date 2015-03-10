@@ -403,6 +403,8 @@ status_t print_for_address(FILE *fin, FILE *backing, virtual_address_t address, 
 	//if it's a write, set the dirty bit after the memory access
 	if (is_write)
 	{
+		//don't bother actually writing the page back out, because this program does not actually do
+		//any writing
 		page_table->table[components.page].dirty = 1;
 	}
 
