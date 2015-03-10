@@ -6,11 +6,7 @@
 
 #include "../include/lru_queue.h"
 
-/**
-  * After a read of a line, determines whether the line-endings are UNIX or Windows style,
-  * 'returning' the number of extraneous characters
-  */
-#define EXTRA_CHARS(line, chars_read) line[chars_read - 2] == '\r' ? 2 : 1
+#define EXTRA_CHARS 2
 
 #define MIN_ARGS 3
 #define ASCII_0 48
@@ -327,17 +323,30 @@ status_t perform_management(FILE *fin, FILE *backing)
 	ssize_t chars_read;
 	while ((chars_read = getline(&line, &size, fin)) > 0)
 	{
-		//eliminate the newline and (potentially) the carriage return as well as one for the space
+		//eliminate the newline and the carriage return as well as one for the space
 		//and the Read/Write indicator
-		chars_read -= EXTRA_CHARS(line, chars_read) + 2;
+		chars_read -= EXTRA_CHARS;
+
+		//sanitize input - it cannot be assumed that the input file has a regular form - make sure
+		//to handle R/W indications and no R/W indications as well as the occasional space at the
+		//end of a line
+		if (line[chars_read - 1] == ' ')
+		{
+			chars_read--;
+		}
+		uint8_t is_write = line[chars_read - 1] == 'W';
+		if (is_write || line[chars_read - 1] == 'R')
+		{
+			chars_read -= 2;
+		}
 		line[chars_read] = '\0';
-		uint8_t is_write = line[chars_read + 1];
 		
 		//convert the string to the address
 		virtual_address_t address;
 		status_t error;
 		if ((error = convert(line, chars_read, &address)) != SUCCESS)
 		{
+			fprintf(stderr, "%s\n", line);
 			error_message(error);
 		}
 		else if ((error = print_for_address(fin, backing, address, &frames, &page_table, &tlb, is_write)) != SUCCESS)
@@ -388,7 +397,7 @@ status_t print_for_address(FILE *fin, FILE *backing, virtual_address_t address, 
 
 	//actually retrieve the memory value at the given physical address
 	frameval_t memval = get_value_at_address(frames, phys_addr);
-	fprintf(stdout, "Virtual address: %u Physical address: %u Value: %d\r\n", address, phys_addr, memval);
+	fprintf(stdout, "Virtual address: %u Physical address: %u Value: %d\n", address, phys_addr, memval);
 
 	//if it's a write, set the dirty bit after the memory access
 	if (is_write)
