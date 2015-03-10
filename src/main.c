@@ -143,29 +143,149 @@ typedef struct
 
 static statistics_t statistics;
 
-status_t perform_management(FILE *fin, FILE *backing);
-status_t print_for_address(FILE *fin, FILE *backing, virtual_address_t address, frame_table_t *frames, page_table_t *page_table, tlb_t *tlb, uint8_t is_write);
+//DRIVER FUNCTIONS---------------------------------------------------------------------------------
+	/**
+	  * After initialization, acts as the main driving function
+	  * @param fin     the file from which the memory addresses will be read
+	  * @param backing the file which contains the backing store
+	  * @return an indication of whether an error occurred
+	  */
+	status_t perform_management(FILE *fin, FILE *backing);
 
-status_t convert(char *line, size_t length, virtual_address_t *value);
-virtual_components_t get_components(virtual_address_t address);
-offset_t get_offset(virtual_address_t address);
-page_number_t get_page(virtual_address_t address);
+	/**
+	  * For a single virtual address, this function will perform all necessary calculations and
+	  * retrieves to ultimately print out the value at the address
+	  * @param fin        the file from which the memory addresses are read
+	  * @param backing    the file which contains the backing store
+	  * @param address    the virtual address being accesses
+	  * @param frames     the frame table
+	  * @param page_table the page_table
+	  * @param tlb        the current tlb
+	  * @param is_write   whether the current memory access is a write or not
+	  * @return an indication of whether an error occurred
+	  */
+	status_t print_for_address(FILE *fin, FILE *backing, virtual_address_t address, frame_table_t *frames, page_table_t *page_table, tlb_t *tlb, uint8_t is_write);
+//END DRIVER FUNCTIONS------------------------------------------------------------------------------
 
-void frame_table_initialize(frame_table_t *frames);
-void frame_table_uninitialize(frame_table_t *frames);
-status_t load_if_necessary(page_table_t *ptable, page_number_t page, frame_table_t *ftable, FILE *backing);
-frame_number_t get_next_frame(frame_table_t *frames);
+//VIRTUAL ADDRESS FUNCTIONS-------------------------------------------------------------------------
+	/**
+	  * Given a string of a particular length, converts it to a virtual address value
+	  * @param line   the string to be converted
+	  * @param length the length of the string
+	  * @param value  the out parameter which will hold the calculated virtual address
+	  * @return an indication of whether an error occurred
+	  */
+	status_t convert(char *line, size_t length, virtual_address_t *value);
 
-void tlb_initialize(tlb_t *tlb);
-void tlb_uninitialize(tlb_t *tlb);
-int get_frame_from_tlb(tlb_t *tlb, page_number_t page, frame_number_t *frame);
+	/**
+	  * Pulls out the components, the page and the offset, of the virtual address
+	  * @param address the virtual address of which to get the components
+	  * @return a structure containing the components of the address
+	  */
+	virtual_components_t get_components(virtual_address_t address);
 
-physical_address_t get_physical_address_from_page_table(page_table_t *ptable, virtual_components_t *components);
-physical_address_t get_physical_address(frame_number_t frame, offset_t offset);
-frameval_t get_value_at_address(frame_table_t *frames, physical_address_t phys_addr);
+	/**
+	  * Pulls out the offset of the virtual address
+	  * @param address the virtual address of which to get the offset
+	  * @return the offset of the address
+	  */
+	offset_t get_offset(virtual_address_t address);
 
+	/**
+	  * Pulls out the page number of the virtual address
+	  * @param address the virtual address of which to get the page number
+	  * @return the page number of the address
+	  */
+	page_number_t get_page(virtual_address_t address);
+//END VIRTUAL ADDRESS FUNCTIONS---------------------------------------------------------------------
 
-status_t error_message(status_t error);
+//FRAME TABLE FUNCTIONS-----------------------------------------------------------------------------
+	/**
+	  * Initializes a frame table data structure after it has been declared
+	  * @param frames the frame table to initialize
+	  */
+	void frame_table_initialize(frame_table_t *frames);
+
+	/**
+	  * Uninitializes a frame table data structure after it is no longer needed.
+	  * @param frames the frame table to uninitialize
+	  */
+	void frame_table_uninitialize(frame_table_t *frames);
+
+	/**
+	  * If the page at the given page number is not already loaded into a frame, this function will
+	  * load it into a frame from the backing store, updating the page table as necessary; if the
+	  * page is already loaded, this function has no effect
+	  * @param ptable  the current page table
+	  * @param page    the number of the page that needs to be loaded
+	  * @param ftable  the current frame table
+	  * @param backing the backing store holding all memory information
+	  * @return an indication of whether an error occurred
+	  */
+	status_t load_if_necessary(page_table_t *ptable, page_number_t page, frame_table_t *ftable, FILE *backing);
+
+	/**
+	  * Gets the value from the frame table at the particular address
+	  * @param frames    the frame table
+	  * @param phys_addr the physical address from which the value is being retrieved
+	  * @return the value at the given physical address
+	  */
+	frameval_t get_value_at_address(frame_table_t *frames, physical_address_t phys_addr);
+//END FRAME TABLE FUNCTIONS------------------------------------------------------------------------
+
+//TLB FUNCTIONS------------------------------------------------------------------------------------
+	/**
+	  * Initializes a TLB data structure after it has been declared
+	  * @param tlb the TLB to be initialized
+	  */
+	void tlb_initialize(tlb_t *tlb);
+
+	/**
+	  * Uninitializes a TLB data structure after it is no longer needed
+	  * @param tlb the TLB to be uninitialized
+	  */
+	void tlb_uninitialize(tlb_t *tlb);
+
+	/**
+	  * Tries to get the frame for the given page from the given TLB. Places the frame in frame and
+	  * returns the index in the TLB of the discovered entry, upon success. Upon failure, returns
+	  * TLB_ENTRIES
+	  * @param tlb   the tlb to be searched
+	  * @param page  the number of the page for which the frame is to be found
+	  * @param frame out param which will hold the frame number for the page upon success
+	  * @return if the frame is successfully found, returns the index in the tlb of the tlb entry;
+	  * otherwise, returns TLB_ENTRIES
+	  */
+	int get_frame_from_tlb(tlb_t *tlb, page_number_t page, frame_number_t *frame);
+//END TLB FUNCTIONS--------------------------------------------------------------------------------
+
+//PHYSICAL ADDRESS FUNCTIONS-----------------------------------------------------------------------
+	/**
+	  * Given a page table and the components of a virtual address, returns the physical address
+	  * corresponding to the components
+	  * @param ptable     the current page table
+	  * @param components the components of the virtual address
+	  * @return the physical address corresponding to the components
+	  */
+	physical_address_t get_physical_address_from_page_table(page_table_t *ptable, virtual_components_t *components);
+
+	/**
+	  * Given a frame number and an offset, returns the corresponding physical address
+	  * @param frame  the frame number
+	  * @param offset the offset from the beginning of the frame
+	  * @return the physical address corresponding to the frame and the offset
+	  */
+	physical_address_t get_physical_address(frame_number_t frame, offset_t offset);
+//PHYSICAL ADDRESS FUNCTIONS-----------------------------------------------------------------------
+
+//ERROR FUNCTIONS
+	/**
+	  * Prints an error message for an error of type status_t, returning the passed error upon
+	  * completion
+	  * @param error the error
+	  * @return the passed error
+	  */
+	status_t error_message(status_t error);
 
 int main(int argc, char *argv[])
 {
@@ -238,56 +358,6 @@ status_t perform_management(FILE *fin, FILE *backing)
 	return SUCCESS;
 }
 
-void frame_table_initialize(frame_table_t *frames)
-{
-	frames->used_frames = 0;
-	lru_queue_initialize(&frames->queue);
-	size_t i;
-	for (i = 0; i < NUMBER_FRAMES; i++)
-	{
-		lru_queue_insert_new(&frames->queue, NUMBER_FRAMES - i - 1);
-	}
-}
-
-void frame_table_uninitialize(frame_table_t *frames)
-{
-	lru_queue_uninitialize(&frames->queue);
-}
-
-void tlb_initialize(tlb_t *tlb)
-{
-	lru_queue_initialize(&tlb->queue);
-	
-	size_t i;
-	for (i = 0; i < TLB_ENTRIES; i++)
-	{
-		tlb->pages[i] = INVALID_PAGE;
-		lru_queue_insert_new(&tlb->queue, TLB_ENTRIES - i - 1);
-	}
-}
-
-void tlb_uninitialize(tlb_t *tlb)
-{
-	lru_queue_uninitialize(&tlb->queue);
-}
-
-status_t convert(char *s, size_t length, virtual_address_t *value)
-{
-    *value = 0;
-    size_t power10;
-    size_t i;
-    for (i = length - 1, power10 = 1; i < SIZE_MAX; i--, power10 *= 10)
-    {
-        if (!isdigit(s[i]))
-        {
-            return NUMB_ERROR;
-        }
-        *value += (s[i] - ASCII_0) * power10;
-    }
-
-    return SUCCESS;
-}
-
 status_t print_for_address(FILE *fin, FILE *backing, virtual_address_t address, frame_table_t *frames, page_table_t *page_table, tlb_t *tlb, uint8_t is_write)
 {
 	//get the page and offset from the address
@@ -339,6 +409,23 @@ status_t print_for_address(FILE *fin, FILE *backing, virtual_address_t address, 
 	return SUCCESS;
 }
 
+status_t convert(char *s, size_t length, virtual_address_t *value)
+{
+    *value = 0;
+    size_t power10;
+    size_t i;
+    for (i = length - 1, power10 = 1; i < SIZE_MAX; i--, power10 *= 10)
+    {
+        if (!isdigit(s[i]))
+        {
+            return NUMB_ERROR;
+        }
+        *value += (s[i] - ASCII_0) * power10;
+    }
+
+    return SUCCESS;
+}
+
 virtual_components_t get_components(virtual_address_t address)
 {
 	virtual_components_t components = { get_page(address), get_offset(address) };
@@ -357,20 +444,21 @@ offset_t get_offset(virtual_address_t address)
 	return address & MAX_OFFSET;
 }
 
-int get_frame_from_tlb(tlb_t *tlb, page_number_t page, frame_number_t *frame)
-{
-	size_t i;
-	for (i = 0; i < TLB_ENTRIES; i++)
-	{
-		if (tlb->pages[i] == page)
-		{
-			statistics.tlb_hits++;
-			*frame = tlb->frames[i];
-			return i;
-		}
-	}
 
-	return TLB_ENTRIES;
+void frame_table_initialize(frame_table_t *frames)
+{
+	frames->used_frames = 0;
+	lru_queue_initialize(&frames->queue);
+	size_t i;
+	for (i = 0; i < NUMBER_FRAMES; i++)
+	{
+		lru_queue_insert_new(&frames->queue, NUMBER_FRAMES - i - 1);
+	}
+}
+
+void frame_table_uninitialize(frame_table_t *frames)
+{
+	lru_queue_uninitialize(&frames->queue);
 }
 
 status_t load_if_necessary(page_table_t *ptable, page_number_t page, frame_table_t *frames, FILE *backing)
@@ -425,6 +513,44 @@ status_t load_if_necessary(page_table_t *ptable, page_number_t page, frame_table
 	return SUCCESS;
 }
 
+frameval_t get_value_at_address(frame_table_t *frames, physical_address_t phys_addr)
+{
+	return *((frameval_t *) frames->table + phys_addr); 
+}
+
+void tlb_initialize(tlb_t *tlb)
+{
+	lru_queue_initialize(&tlb->queue);
+	
+	size_t i;
+	for (i = 0; i < TLB_ENTRIES; i++)
+	{
+		tlb->pages[i] = INVALID_PAGE;
+		lru_queue_insert_new(&tlb->queue, TLB_ENTRIES - i - 1);
+	}
+}
+
+void tlb_uninitialize(tlb_t *tlb)
+{
+	lru_queue_uninitialize(&tlb->queue);
+}
+
+int get_frame_from_tlb(tlb_t *tlb, page_number_t page, frame_number_t *frame)
+{
+	size_t i;
+	for (i = 0; i < TLB_ENTRIES; i++)
+	{
+		if (tlb->pages[i] == page)
+		{
+			statistics.tlb_hits++;
+			*frame = tlb->frames[i];
+			return i;
+		}
+	}
+
+	return TLB_ENTRIES;
+}
+
 physical_address_t get_physical_address_from_page_table(page_table_t *ptable, virtual_components_t *components)
 {
 	return get_physical_address(ptable->table[components->page].frame, components->offset);
@@ -433,11 +559,6 @@ physical_address_t get_physical_address_from_page_table(page_table_t *ptable, vi
 physical_address_t get_physical_address(frame_number_t frame, offset_t offset)
 {
 	return frame * FRAME_BYTES + offset;
-}
-
-frameval_t get_value_at_address(frame_table_t *frames, physical_address_t phys_addr)
-{
-	return *((frameval_t *) frames->table + phys_addr); 
 }
 
 status_t error_message(status_t error)
