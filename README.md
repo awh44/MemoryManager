@@ -18,7 +18,9 @@ following locations, respectively:
 	output/my_writeback_results.txt
 	
 Also included in this directory is the original correct.txt file as well as a
-file which contains only the rightmost value field, values\_correct.txt.
+file which contains only the rightmost value field, values\_correct.txt. Note
+that correct.txt has been converted from DOS ("\r\n") line endings to UNIX
+("\n") ones and that a newline has been added at the end of the file.
 
 # Compilation and Output Generation
 Two files for compiling/creating/running are included:
@@ -37,9 +39,10 @@ The makefile supports the following targets:
 	               needed to get the different functionality for the differing
                    frame table sizes. Only run this target if you'd like to
                    recreate the three output files.
-	compare-orig - this will perform a comparison between the value fields of
-	               my_orig_results.txt and of values_correct.txt.
-	compare-reduced - the same as above but with my_reduced_results.txt
+	compare-orig - this will perform a comparison between my_orig_results.txt
+	               and correct.txt
+	compare-reduced - this will perform a comparison between the value fields of
+	                  my_reduced_results.txt and of values_correct.txt
 	compare-writeback - the same as above but with my_writeback_results.txt
 	FILE=x BACKING=y make run - compiles and runs program with input file x and
 	                            backing store y
