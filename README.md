@@ -1,14 +1,14 @@
 # MemoryManager
 A simulation of a virtual memory manager for an operating systems course.
 
-# Source
+## Source
 The source files contained herein are as follows:
 
 	src/main.c - the main driver file
 	src/lru_queue.c - an implementation of a LRU queue data type
 	include/lru_queue.h - the header file for the LRU queue
 
-# Output
+## Output
 Also included are output results from a frame table of size 256, a frame table
 of size 128, and a frame table of size 128 with a dirty bit indication, at the
 following locations, respectively:
@@ -22,7 +22,7 @@ file which contains only the rightmost value field, values\_correct.txt. Note
 that correct.txt has been converted from DOS ("\r\n") line endings to UNIX
 ("\n") ones and that a newline has been added at the end of the file.
 
-# Compilation and Output Generation
+## Compilation and Output Generation
 Two files for compiling/creating/running are included:
 
 	makefile
@@ -51,7 +51,7 @@ The makefile supports the following targets:
 	build/lru_queue.o - compiles the lru_queue data type
 	clean - removes manager and build files
 
-# Input
+## Input
 Also included are the given input files:
 
 	input/addresses.txt
