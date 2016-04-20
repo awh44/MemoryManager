@@ -116,7 +116,8 @@ typedef struct
 
 /**
   * Holds the information on the TLB, including which page numbers are in it and which entry is to
-  * be replaced next
+  * be replaced next. Note that TLB does not need to contain dirty bit information because page
+  * table is always consulted for this
   */
 typedef struct
 {
